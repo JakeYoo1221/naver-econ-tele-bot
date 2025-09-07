@@ -2,14 +2,27 @@ name: Run daily summary (KST 07:50)
 
 on:
   schedule:
-    - cron: "50 22 * * *"   # 22:50 UTC = 07:50 KST
-  workflow_dispatch:
+    - cron: "50 22 * * *"   # GitHub Actions는 UTC. 22:50 UTC = 07:50 KST
+  workflow_dispatch:        # 수동 실행 버튼
 
 jobs:
   run:
     runs-on: ubuntu-latest
+
+    # ← 여기서 Secrets를 노트북에 환경변수로 주입
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+      NOTEBOOK_PATH: News_scheduler.ipynb   # 노트북 경로(루트가 아니면 수정: 예) notebooks/News_scheduler.ipynb
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Sanity check (repo files)
+        run: |
+          echo "== repo root =="; pwd
+          echo "== first 3 levels =="; find . -maxdepth 3 -type f | sort
+          test -f "$NOTEBOOK_PATH" || (echo "❌ Not found: $NOTEBOOK_PATH" && exit 1)
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -19,21 +32,16 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
+          # 노트북 실행용
+          pip install jupyter nbconvert ipykernel
+          # 모델/크롤링 의존성
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install transformers sentencepiece requests beautifulsoup4 pytz
+          pip install transformers sentencepiece requests beautifulsoup4 pytz lxml
 
-      - name: Inject secrets and run
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+      - name: Execute notebook (one-shot)
         run: |
-          python - <<'PY'
-          import os, pathlib, subprocess, sys
-          token = os.environ["TELEGRAM_TOKEN"]
-          chat  = os.environ["CHAT_ID"]
-          p = pathlib.Path("news_runner.py").read_text(encoding="utf-8")
-          p = p.replace('TELEGRAM_TOKEN = "REPLACE_ME"', f'TELEGRAM_TOKEN = "{token}"')
-          p = p.replace('CHAT_ID = "REPLACE_ME"', f'CHAT_ID = "{chat}"')
-          pathlib.Path("news_runner_exec.py").write_text(p, encoding="utf-8")
-          subprocess.check_call([sys.executable, "news_runner_exec.py"])
-          PY
+          jupyter nbconvert \
+            --to notebook \
+            --execute "$NOTEBOOK_PATH" \
+            --ExecutePreprocessor.timeout=1800 \
+            --output "News_scheduler_out.ipynb"
