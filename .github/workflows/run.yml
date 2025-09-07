@@ -1,0 +1,46 @@
+name: Run daily summary (KST 07:50)
+
+on:
+  schedule:
+    - cron: "50 22 * * *"   # GitHub Actions는 UTC. 22:50 UTC = 07:50 KST
+  workflow_dispatch:        # 수동 실행 버튼
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers sentencepiece requests beautifulsoup4 pytz
+
+      - name: Run
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python - <<'PY'
+import os, pathlib, subprocess, sys
+# GitHub Secrets에서 환경변수 가져오기
+token = os.environ.get("TELEGRAM_TOKEN","")
+chat  = os.environ.get("CHAT_ID","")
+
+# news_runner.py 읽고 토큰/채팅ID 주입
+p = pathlib.Path("news_runner.py").read_text(encoding="utf-8")
+p = p.replace('TELEGRAM_TOKEN = "REPLACE_ME"', f'TELEGRAM_TOKEN = "{token}"')
+p = p.replace('CHAT_ID = "REPLACE_ME"', f'CHAT_ID = "{chat}"')
+
+tmp = "news_runner_exec.py"
+pathlib.Path(tmp).write_text(p, encoding="utf-8")
+
+# 실행
+subprocess.check_call([sys.executable, tmp])
+PY
